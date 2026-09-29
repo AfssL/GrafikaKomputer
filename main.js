@@ -1,58 +1,209 @@
+import {
+  Mat3
+} from "./matrix3.js";
+
 const canvas =
-  document.getElementById("webgl-canvas");
+  document.getElementById(
+    "webgl-canvas"
+  );
+
 const gl =
-  canvas.getContext("webgl2");
+  canvas.getContext(
+    "webgl2"
+  );
 
 if (!gl) {
-  alert("WebGL2 tidak tersedia pada browser/perangkat ini.");
-  throw new Error("WebGL2 tidak tersedia.");
+  throw new Error(
+    "WebGL2 tidak tersedia."
+  );
 }
 
-gl.viewport(0, 0, canvas.width, canvas.height);
+gl.viewport(
+  0,
+  0,
+  canvas.width,
+  canvas.height
+);
 
+//vertex shader
 const vertexShaderSource = `#version 300 es
+
 in vec2 a_position;
+
 in vec3 a_color;
+
+uniform mat3 u_matrix;
+
 out vec3 v_color;
+
 void main() {
-  gl_Position = vec4(a_position, 0.0, 1.0);
-  v_color = a_color;
+  vec3 p =
+    u_matrix *
+    vec3(
+      a_position,
+      1.0
+    );
+
+  gl_Position =
+    vec4(
+      p.xy,
+      0.0,
+      1.0
+    );
+
+  v_color =
+    a_color;
 }`;
 
+//fragment shader
 const fragmentShaderSource = `#version 300 es
-precision highp float;
-in vec3 v_color;
-out vec4 outColor;
-void main() { outColor = vec4(v_color, 1.0); }`;
 
-function createShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    throw new Error(gl.getShaderInfoLog(shader));
+precision highp float;
+
+in vec3 v_color;
+
+out vec4 outColor;
+
+void main() {
+  outColor =
+    vec4(
+      v_color,
+      1.0
+    );
+}
+`;
+
+function createShader(
+  gl,
+  type,
+  source
+) {
+  const shader =
+    gl.createShader(type);
+
+  gl.shaderSource(
+    shader,
+    source
+  );
+
+  gl.compileShader(
+    shader
+  );
+
+  const success =
+    gl.getShaderParameter(
+      shader,
+      gl.COMPILE_STATUS
+    );
+
+  if (!success) {
+    const info =
+      gl.getShaderInfoLog(
+        shader
+      );
+
+    gl.deleteShader(
+      shader
+    );
+
+    throw new Error(
+      "Shader compile error:\n" +
+      info
+    );
   }
+
   return shader;
 }
 
-function createProgram(gl, vs, fs) {
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    throw new Error(gl.getProgramInfoLog(program));
+function createProgram(
+  gl,
+  vs,
+  fs
+) {
+  const program =
+    gl.createProgram();
+
+  gl.attachShader(
+    program,
+    vs
+  );
+
+  gl.attachShader(
+    program,
+    fs
+  );
+
+  gl.linkProgram(
+    program
+  );
+
+  const success =
+    gl.getProgramParameter(
+      program,
+      gl.LINK_STATUS
+    );
+
+  if (!success) {
+    const info =
+      gl.getProgramInfoLog(
+        program
+      );
+
+    gl.deleteProgram(
+      program
+    );
+
+    throw new Error(
+      "Program link error:\n" +
+      info
+    );
   }
+
   return program;
 }
 
-const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
-const program = createProgram(gl, vertexShader, fragmentShader);
-gl.useProgram(program);
+const vertexShader =
+  createShader(
+    gl,
+    gl.VERTEX_SHADER,
+    vertexShaderSource
+  );
 
-const positionLocation = gl.getAttribLocation(program, "a_position");
-const colorLocation = gl.getAttribLocation(program, "a_color");
+const fragmentShader =
+  createShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    fragmentShaderSource
+  );
+
+const program =
+  createProgram(
+    gl,
+    vertexShader,
+    fragmentShader
+  );
+
+gl.useProgram(
+  program
+);
+
+const positionLocation =
+  gl.getAttribLocation(
+    program,
+    "a_position"
+  );
+
+const colorLocation =
+  gl.getAttribLocation(
+    program,
+    "a_color"
+  );
+
+const matrixLocation =
+  gl.getUniformLocation(
+    program,
+    "u_matrix"
+  );
 
 const horizonX = 0.0, horizonY = -0.05; //titik hilang jalan
 
@@ -473,114 +624,306 @@ for (const [ox, oy, deg, rad] of leafDomes) {
 const allPositions = new Float32Array(positions);
 const allColors = new Float32Array(colors);
 
+//geometri bola
+const ballAspect = canvas.height / canvas.width;
+const ballSegments = 20;
+const ballRadius = 0.045;
+const ballColorValue = [0.95, 0.35, 0.25];
 
-//buffer
-function createBuffer(gl, data) {
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-  return buffer;
-}
-const positionBuffer = createBuffer(gl, allPositions);
-const colorBuffer = createBuffer(gl, allColors);
+const ballVertexCount = ballSegments + 2; //1 titik pusat + (segmen+1) titik busur
+const ballPositionsLocal = new Array(ballVertexCount * 2);
+const ballColorsLocal = new Array(ballVertexCount * 3);
 
-function setupAttribute(gl, buffer, location, size) {
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.enableVertexAttribArray(location);
-  gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
-}
-setupAttribute(gl, positionBuffer, positionLocation, 2);
-setupAttribute(gl, colorBuffer, colorLocation, 3);
+//buat titik pusat
+ballPositionsLocal[0] = 0;
+ballPositionsLocal[1] = 0;
+ballColorsLocal[0] = ballColorValue[0];
+ballColorsLocal[1] = ballColorValue[1];
+ballColorsLocal[2] = ballColorValue[2];
 
-//draw
-gl.clear(gl.COLOR_BUFFER_BIT);
+//menentukan titik-titik busur bola
+for (let i = 0; i <= ballSegments; i++) {
+  const angle = (Math.PI * 2 * i) / ballSegments;
+  const posIndex = (i + 1) * 2;
+  const colIndex = (i + 1) * 3;
 
-//rumput
-gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  ballPositionsLocal[posIndex] = Math.cos(angle) * ballRadius * ballAspect;
+  ballPositionsLocal[posIndex + 1] = Math.sin(angle) * ballRadius;
 
-//jalan
-gl.drawArrays(gl.TRIANGLES, 4, 3);
-gl.drawArrays(gl.LINE_LOOP, 7, 3);
-
-//kotak kanan
-gl.drawArrays(gl.TRIANGLE_STRIP, 10, 4);
-gl.drawArrays(gl.LINE_LOOP, 14, 4);
-
-//kotak kiri
-gl.drawArrays(gl.TRIANGLE_STRIP, 18, 4);
-gl.drawArrays(gl.LINE_LOOP, 22, 4);
-
-//atap segitiga
-gl.drawArrays(gl.TRIANGLES, 26, 3);
-gl.drawArrays(gl.LINE_LOOP, 29, 3);
-
-//atap kiri
-gl.drawArrays(gl.TRIANGLE_STRIP, 32, 4);
-gl.drawArrays(gl.LINE_LOOP, 36, 4);
-
-//pintu
-gl.drawArrays(gl.TRIANGLE_STRIP, 40, 4);
-gl.drawArrays(gl.LINE_LOOP, 44, 4);
-
-//jendela 1
-gl.drawArrays(gl.TRIANGLE_STRIP, 48, 4);
-gl.drawArrays(gl.LINE_LOOP, 52, 4);
-
-//jendela 2
-gl.drawArrays(gl.TRIANGLE_STRIP, 56, 4);
-gl.drawArrays(gl.LINE_LOOP, 60, 4);
-
-//jendela 3
-gl.drawArrays(gl.TRIANGLE_STRIP, 64, 4);
-gl.drawArrays(gl.LINE_LOOP, 68, 4);
-
-//jendela 4
-gl.drawArrays(gl.TRIANGLE_STRIP, 72, 4);
-gl.drawArrays(gl.LINE_LOOP, 76, 4);
-
-//daun
-for (let i = 0; i < leafDomes.length * 2; i++) {
-  gl.drawArrays(gl.TRIANGLE_FAN, leafStart + i * leafFanCount, leafFanCount);
+  ballColorsLocal[colIndex] = ballColorValue[0];
+  ballColorsLocal[colIndex + 1] = ballColorValue[1];
+  ballColorsLocal[colIndex + 2] = ballColorValue[2];
 }
 
-//batang
-gl.drawArrays(gl.TRIANGLE_STRIP, 80, 4);
-gl.drawArrays(gl.LINE_LOOP, 84, 4);
+//position buffer
+const positionBuffer =
+  gl.createBuffer();
 
-//marka jalan
-gl.drawArrays(gl.LINES, 88, 10);
+gl.bindBuffer(
+  gl.ARRAY_BUFFER,
+  positionBuffer,
+);
 
-//padi
-gl.drawArrays(gl.LINES, 98, 56);
+gl.bufferData(
+  gl.ARRAY_BUFFER,
+  allPositions,
+  gl.STATIC_DRAW,
+);
 
-//NDC untuk menampilkan koordinat
+//color buffer
+const colorBuffer =
+  gl.createBuffer();
+
+gl.bindBuffer(
+  gl.ARRAY_BUFFER,
+  colorBuffer,
+);
+
+gl.bufferData(
+  gl.ARRAY_BUFFER,
+  allColors,
+  gl.STATIC_DRAW,
+);
+
+//position ball buffer
+const ballPositionBuffer =
+  gl.createBuffer();
+gl.bindBuffer(
+  gl.ARRAY_BUFFER,
+  ballPositionBuffer,
+);
+
+gl.bufferData(
+  gl.ARRAY_BUFFER,
+  new Float32Array(ballPositionsLocal),
+  gl.STATIC_DRAW,
+);
+
+//color ball buffer
+const ballColorBuffer =
+  gl.createBuffer();
+
+gl.bindBuffer(
+  gl.ARRAY_BUFFER,
+  ballColorBuffer,
+);
+
+gl.bufferData(
+  gl.ARRAY_BUFFER,
+  new Float32Array(ballColorsLocal),
+  gl.STATIC_DRAW,
+);
+
+//bind position & color
+gl.bindBuffer(
+  gl.ARRAY_BUFFER,
+  positionBuffer,
+);
+
+gl.enableVertexAttribArray(
+  positionLocation,
+);
+
+gl.vertexAttribPointer(
+  positionLocation,
+  2,
+  gl.FLOAT,
+  false,
+  0,
+  0,
+);
+
+gl.bindBuffer(
+  gl.ARRAY_BUFFER,
+  colorBuffer,
+);
+
+gl.enableVertexAttribArray(
+  colorLocation,
+);
+
+gl.vertexAttribPointer(
+  colorLocation,
+  3,
+  gl.FLOAT,
+  false,
+  0,
+  0,
+);
+
+//bola
+const ballX = -0.05;
+const ballBottomY = -0.85; //titik terendah pantulan
+const ballTopY = -0.55; //titik tertinggi pantulan
+let ballY = ballBottomY;
+let ballDirection = 1;  //1 = naik, -1 = turun
+const ballSpeed = 0.9;
+
+//update objek bola
+function updateBall(dt) {
+  ballY += ballDirection * ballSpeed * dt;
+  if (ballY >= ballTopY) {
+    ballY = ballTopY;
+    ballDirection = -1;
+  }
+  if (ballY <= ballBottomY) {
+    ballY = ballBottomY;
+    ballDirection = 1;
+  }
+}
+
+//gambar scene
+function drawScene() {
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  //rumput
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  //jalan
+  gl.drawArrays(gl.TRIANGLES, 4, 3);
+  gl.drawArrays(gl.LINE_LOOP, 7, 3);
+
+  //kotak kanan
+  gl.drawArrays(gl.TRIANGLE_STRIP, 10, 4);
+  gl.drawArrays(gl.LINE_LOOP, 14, 4);
+
+  //kotak kiri
+  gl.drawArrays(gl.TRIANGLE_STRIP, 18, 4);
+  gl.drawArrays(gl.LINE_LOOP, 22, 4);
+
+  //atap segitiga
+  gl.drawArrays(gl.TRIANGLES, 26, 3);
+  gl.drawArrays(gl.LINE_LOOP, 29, 3);
+
+  //atap kiri
+  gl.drawArrays(gl.TRIANGLE_STRIP, 32, 4);
+  gl.drawArrays(gl.LINE_LOOP, 36, 4);
+
+  //pintu
+  gl.drawArrays(gl.TRIANGLE_STRIP, 40, 4);
+  gl.drawArrays(gl.LINE_LOOP, 44, 4);
+
+  //jendela 1
+  gl.drawArrays(gl.TRIANGLE_STRIP, 48, 4);
+  gl.drawArrays(gl.LINE_LOOP, 52, 4);
+
+  //jendela 2
+  gl.drawArrays(gl.TRIANGLE_STRIP, 56, 4);
+  gl.drawArrays(gl.LINE_LOOP, 60, 4);
+
+  //jendela 3
+  gl.drawArrays(gl.TRIANGLE_STRIP, 64, 4);
+  gl.drawArrays(gl.LINE_LOOP, 68, 4);
+
+  //jendela 4
+  gl.drawArrays(gl.TRIANGLE_STRIP, 72, 4);
+  gl.drawArrays(gl.LINE_LOOP, 76, 4);
+
+  //daun
+  for (let i = 0; i < leafDomes.length * 2; i++) {
+    gl.drawArrays(gl.TRIANGLE_FAN, leafStart + i * leafFanCount, leafFanCount);
+  }
+
+  //batang
+  gl.drawArrays(gl.TRIANGLE_STRIP, 80, 4);
+  gl.drawArrays(gl.LINE_LOOP, 84, 4);
+
+  //marka jalan
+  gl.drawArrays(gl.LINES, 88, 10);
+
+  //padi
+  gl.drawArrays(gl.LINES, 98, 56);
+}
+
+//gambar bola
+function drawBall() {
+  gl.bindBuffer(gl.ARRAY_BUFFER, ballPositionBuffer);
+  gl.enableVertexAttribArray(positionLocation);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, ballColorBuffer);
+  gl.enableVertexAttribArray(colorLocation);
+  gl.vertexAttribPointer(colorLocation, 3, gl.FLOAT, false, 0, 0);
+
+  const matrix = Mat3.translation(ballX, ballY);
+  gl.uniformMatrix3fv(matrixLocation, false, matrix);
+
+  gl.drawArrays(gl.TRIANGLE_FAN, 0, ballVertexCount);
+}
+
+//render loop
+let lastTime = 0;
+
+function render(time) {
+  let dt = (time - lastTime) * 0.001;
+  lastTime = time;
+  dt = Math.min(dt, 0.05);
+
+  updateBall(dt);
+
+  gl.bindBuffer(
+    gl.ARRAY_BUFFER,
+    positionBuffer,
+  );
+
+  gl.enableVertexAttribArray(
+    positionLocation,
+  );
+
+  gl.vertexAttribPointer(
+    positionLocation,
+    2,
+    gl.FLOAT,
+    false,
+    0,
+    0,
+  );
+
+  gl.bindBuffer(
+    gl.ARRAY_BUFFER,
+    colorBuffer,
+  );
+
+  gl.enableVertexAttribArray(
+    colorLocation,
+  );
+
+  gl.vertexAttribPointer(
+    colorLocation,
+    3,
+    gl.FLOAT,
+    false,
+    0,
+    0,
+  );
+
+  gl.uniformMatrix3fv(
+    matrixLocation,
+    false,
+    Mat3.identity(),
+  );
+
+  drawScene();
+
+  drawBall();
+
+  requestAnimationFrame(render);
+}
+
+//NDC mouse
 function mouseToNDC(event) {
-  const rect =
-    canvas.getBoundingClientRect();
-
-  const mouseX =
-    event.clientX - rect.left;
-
-  const mouseY =
-    event.clientY - rect.top;
-
-  const x =
-    (mouseX / rect.width) * 2.0 - 1.0;
-
-  const y =
-    1.0 - (mouseY / rect.height) * 2.0;
-
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = event.clientX - rect.left;
+  const mouseY = event.clientY - rect.top;
+  const x = (mouseX / rect.width) * 2.0 - 1.0;
+  const y = 1.0 - (mouseY / rect.height) * 2.0;
   return { x, y };
 }
 
-canvas.addEventListener(
-  "mousemove",
-  (event) => {
-    const p = mouseToNDC(event);
+canvas.addEventListener("mousemove", (event) => {
+  const p = mouseToNDC(event);
+  document.getElementById("info").textContent =
+    `Mouse NDC: (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`;
+});
 
-    document.getElementById(
-      "info"
-    ).textContent =
-      `Mouse NDC: (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`;
-  }
-);
+requestAnimationFrame(render);
